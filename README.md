@@ -31,6 +31,9 @@
   * [Схема балансировки межсервисных запросов](#схема-балансировки-межсервисных-запросов)
   * [Схема отказоустойчивости](#схема-отказоустойчивости)
   * [Терминация SSL](#терминация-ssl)
+* [5. Логическая схема БД](#5-логическая-схема-бд)
+  * [Описание сущностей](#описание-сущностей)
+  * [Особенности распределения нагрузки по ключам](#особенности-распределения-нагрузки-по-ключам)
 * [Список источников](#список-источников)
 
 <!-- mtoc-end -->
@@ -170,7 +173,9 @@ $\textit{MAU}_\text{плат} \approx \frac{1146}{12.5} = 91.68$ (млн. чел
 и означает регистрация. Тогда имеет место соотношение для числа регистраций в
 месяц
 
-$R = \Delta \textit{MAU}_\text{плат} \frac{\textit{MAU}}{\textit{MAU}_\text{плат}} \approx \frac{1146 - 1118}{12.5} \cdot \frac{554.00}{91.68} \approx 13.54$ (млн.)
+$R=\Delta\textit{MAU}_\text{плат}\frac{\textit{MAU}}{\textit{MAU}_\text{плат}}$
+
+$R \approx\frac{1146 - 1118}{12.5}\cdot\frac{554.00}{91.68}\approx 13.54$ (млн.)
 
 Усредняя это число для суточного периода, имеем
 
@@ -507,6 +512,183 @@ Nginx анализирует запрос и разделяет его в зав
 Терминацию SSL необходимо производить на входе в k8s кластер. Раньше
 нельзя, так как запрос может быть направлен не на бэкенд, а в хранилище
 статики.
+
+## 5. Логическая схема БД
+
+```mermaid
+erDiagram
+  chat_message {
+    int64 id
+    string(500) text
+    int64 attached_id
+    int64 sender_id
+    int64 receiver_id
+    int64 chat_id
+    datetime created_at
+    datetime updated_at
+  }
+
+  chat_message_attachment {
+    int id
+    int size
+    string name
+    file attachment
+  }
+
+  chat_recording {
+    int64 id
+    enum state
+    file recording
+  }
+
+  conference_recording {
+    int id
+    enum state
+    file recording
+  }
+
+  chat {
+    int64 id
+    int64 recording_id
+    datetime created_at
+    datetime updated_at
+  }
+
+  conference_session {
+    int32 id
+    int64 conference_id
+    datetime created_at
+    datetime updated_at
+  }
+
+  conference {
+    int64 id
+    int64 owner_id
+    int64 chat_id
+    int64 parent_id
+    int64 recording_id
+    string(100) name
+    string(50) join_password
+    datetime created_at
+    datetime updated_at
+  }
+
+  conference_participant {
+    int64 id
+    int64 user_id
+    int64 conference_id
+    string(50) participant_name
+    datetime created_at
+    datetime updated_at
+  }
+
+  user_session {
+    int32 id
+    int64 user_id
+    datetime created_at
+    datetime updated_at
+  }
+
+  user {
+    int64 id
+    string(50) name
+    string(50) email
+    string(50) password
+    datetime created_at
+    datetime updated_at
+  }
+
+  chat_message_buffer {
+    int64 message_id
+    int64 chat_id
+    int64 sender_id
+    int64 receiver_id
+    string(500) message_text
+    string(100) attachment_location
+  }
+
+  conference_out_buffer {
+    int64 conference_id
+    rdp_frame videoframe
+  }
+
+  conference_in_buffer {
+    int64 participant_id
+    int64 conference_id
+    rdp_frame videoframe
+  }
+
+  live_conference_cache {
+    int conference_id
+    conference_participant[] participants
+    conference[] children
+  }
+
+  conference_participant ||--o| user : might_be
+  conference_participant ||--o| conference : participates_in
+
+  conference ||--o| conference_recording : might_have
+
+  conference ||--|| chat : has
+  user ||--|| conference : owns
+
+  user_session }o--|| user : authenticates
+
+  conference }o--o| conference : might_have_parent
+
+  chat_message }o--|| chat : in
+  chat_message ||--o| chat_message_attachment: might_have
+  conference_participant ||--|| chat_message : sends
+  conference_participant |o--|| chat_message : receives
+
+  chat ||--o| chat_recording : might_have
+
+  conference_session |o--|| conference : is_a_join_link_to
+
+  chat_message ||--o| chat_message_buffer : are_sended_in_real_time_via
+
+  conference ||--o| conference_out_buffer : are_translated_in_real_time_via
+  conference_in_buffer }o--|| conference : streaming_in 
+  conference_participant ||--o| conference_in_buffer : uploads_video_and_audio_to
+
+```
+
+*Примечание*. Названия типов приведены условно, так как они зависят от выбора
+конкретной СУБД.
+
+*Примечание 2*. Для conference_cache связи не указаны, чтобы сохранить читаемость схемы.
+
+### Описание сущностей
+
+| Сущность                | Назначение                                                                   | Дополнительные требования к консистентности                                                         | Объем единицы сущности |
+|-------------------------|------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|------------------------|
+| user_session            | Хранение сессий зарегистрированных пользователей                             | Отсутствуют                                                                                         | 28 байт                |
+| conference_participant  | Хранение данных участника конференции                                        | Отсутствуют                                                                                         | 80 байт                |
+| user                    | Хранение данных зарегистрированного пользователя                             | Отсутствуют                                                                                         | 174 байт               |
+| conference              | Хранение данных конференции                                                  | Создается одновременно с chat                                                                       | 206 байт               |
+| conference_session      | Хранение сессии конференции (для реализации подключения по ссылке)           | Время жизни заканчивается после завершения конференции                                              | 28 байт                |
+| conference_out_buffer   | Реализация publisher-subscriber для видеопотока живой конференции            | Уничтожается после завершения конференции                                                           | 3.8 Мбит               |
+| conference_in_buffer    | Реализация publisher-subscriber для видеопотока живой конференции            | Уничтожается с выходом conference_participant из конференции                                        | 3.8 Мбит               |
+| conference_recording    | Хранение записи конференции (Файловое хранилище, имеет схему с кэшированием) | Отсутствуют, так как сущность не может быть изменена после создания                                 | ~12 Гбайт              |
+| chat                    | Хранение чата конференции                                                    | Создается одновременно с conference                                                                 | 32 байт                |
+| chat_recording          | Хранение записи чата (Файловое хранилище, кэш)                               | Отсутствуют, так как сущность не может быть изменена после создания                                 | Не фиксируется ~ 6 кБ  |
+| chat_message            | Хранение сообщения в чате                                                    | Отсутствуют                                                                                         | 556 байт               |
+| chat_message_attachment | Хранение прикрепленных файлов в чате (Файловое хранилище)                    | Нужно удалять, если удаляется chat_message, содержащий её                                           | ~10 Мб                 |
+| chat_message_buffer     | Реализация publisher-subscriber для сообщений в чате                         | Состоит из дублирующихся данных, но живет мало. attachment_location указывает на прикрепленный файл | 632 байт               |
+
+### Особенности распределения нагрузки по ключам
+
+* Практически каждый пользователь сходит в таблицу conference для получения данных о конференции. Поэтому на
+  неё приходится большая часть продуктовой нагрузки на чтение
+
+* Для chat и conference применен partitioning.
+  Это нужно для того, чтобы разделить запросы по доменам
+
+* conference_participant, помимо сопоставимой нагрузки на чтение,
+  как и для conference, обладает такой же нагрузкой и на запись, так как
+  conference_participant создается для КАЖДОЙ конференции для КАЖДОГО её участника.
+  Поэтому для доступа к производной информации о участнике используется кэш, который
+  умирает вместе с остановкой конференции.
 
 ## Список источников
 
