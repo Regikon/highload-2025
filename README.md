@@ -622,6 +622,7 @@ erDiagram
     int conference_id
     conference_participant[] participants
     conference[] children
+    chat_messages[] chat
   }
 
   conference_participant ||--o| user : might_be
