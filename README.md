@@ -529,8 +529,8 @@ erDiagram
   }
 
   chat_message_attachment {
-    int id
-    int size
+    int64 id
+    int64 size
     string name
     file attachment
   }
@@ -542,7 +542,7 @@ erDiagram
   }
 
   conference_recording {
-    int id
+    int64 id
     enum state
     file recording
   }
@@ -619,7 +619,7 @@ erDiagram
   }
 
   live_conference_cache {
-    int conference_id
+    int64 conference_id
     conference_participant[] participants
     conference[] children
     chat_messages[] chat
