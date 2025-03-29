@@ -33,7 +33,8 @@
   * [Терминация SSL](#терминация-ssl)
 * [5. Логическая схема БД](#5-логическая-схема-бд)
   * [Описание сущностей](#описание-сущностей)
-  * [Особенности распределения нагрузки по ключам](#особенности-распределения-нагрузки-по-ключам)
+  * [Нагрузка на сущности](#нагрузка-на-сущности)
+  * [Особенности поддержания консистентности сущностей](#особенности-поддержания-консистентности-сущностей)
 * [6. Физическая схема БД](#6-физическая-схема-бд)
   * [Выбор индексов](#выбор-индексов)
   * [Денормализация](#денормализация)
@@ -504,7 +505,7 @@ Nginx анализирует запрос и разделяет его в зав
 
 ### Схема балансировки межсервисных запросов
 
-Межсервисное взаимодействие строится при помощи sidecar proxy, реализуемую
+Межсервисное взаимодействие строится при помощи sidecar proxy, реализуемого
 при помощи k8s.
 
 Межсервисного взаимодействия для медиасервера не предусматривается.
@@ -533,139 +534,153 @@ Nginx анализирует запрос и разделяет его в зав
 
 ## 5. Логическая схема БД
 
+*Примечание 1*. Названия типов приведены условно, так как они зависят от выбора
+конкретной СУБД.
+
+*Примечание 2*. Для live_conference связи не указаны,
+чтобы сохранить читаемость схемы.
+
+*Примечание 3* Здесь обозначены не связи между данными в сущностях, а
+связи между самими сущностями. Так, например, очевидно, что в
+выходные и входные буферы пишется видеопоток, а не данные
+о конференциях.
+
+*Примечание 4* Файлы не хранятся напрямую в таблицах с ними,
+но приведены, чтобы не загроможать схему. Хранение файлов обеспечивается объектным
+хранилищем.
+
+*Примечание 5* Схема уже в некоторой степени является денормализованной. Так,
+сущности chat и conference со связью 1к1 соединены для минимизации join операций.
+
 ```mermaid
 erDiagram
   chat_message {
-    int64 id
+    uuid id PK
     string(500) text
-    int64 attached_id
-    int64 sender_id
-    int64 receiver_id
-    int64 chat_id
+    uuid sender_id FK
+    uuid receiver_id FK "Если NULL, то считаем, что адресат - все в конференции"
+    uuid conference_id FK 
+    uuid attached_id FK
+    json attached "Хранит chat_message_attachment"
     datetime created_at
     datetime updated_at
   }
 
   chat_message_attachment {
-    int64 id
+    uuid id PK
     int64 size
-    string name
+    string(260) name
+    string(500) url "Ссылка на attachment"
     file attachment
-  }
-
-  chat_recording {
-    int64 id
-    enum state
-    file recording
-  }
-
-  conference_recording {
-    int64 id
-    enum state
-    file recording
-  }
-
-  chat {
-    int64 id
-    int64 recording_id
     datetime created_at
     datetime updated_at
   }
 
   conference {
-    int64 id
-    int64 owner_id
-    int64 chat_id
-    int64 parent_id
-    int64 recording_id
+    uuid id PK
+    uuid owner_id FK
+    uuid parent_id FK "Для сессионных залов"
     string(100) name
     string(50) join_password
     string(250) join_link
+    string(250) server_location "Расположение сервера с конференцией"
+    string(500) recording_url "Ссылка на recording"
+    file recording
+    datetime started_at "В случае, если заранее планируется, то != created_at"
+    datetime ended_at
+    datetime created_at
+    datetime updated_at
+  }
+
+  conference_metrics {
+    uuid id PK
+    int32 max_participants
+    int32 average_participants
+    int32 chat_messages_count
+    float64 duration
+    bool has_recording
     datetime created_at
     datetime updated_at
   }
 
   conference_participant {
-    int64 id
-    int64 user_id
-    int64 conference_id
+    uuid id PK
+    uuid user_id FK "NULL для незарегистрированного пользователя"
+    uuid conference_id FK
     string(50) participant_name
     datetime created_at
     datetime updated_at
   }
 
   user_auth_token {
-    int32 id
-    int64 user_id
+    string(128) token PK
+    uuid user_id FK
     datetime created_at
-    datetime updated_at
   }
 
   user {
-    int64 id
+    uuid id PK
     string(50) name
     string(50) email
     string(50) password
+    array(conference) pending_conferences "conference, запланированные пользователем"
     datetime created_at
     datetime updated_at
   }
 
   chat_message_buffer {
-    int64 message_id
-    int64 chat_id
-    int64 sender_id
-    int64 receiver_id
+    uuid message_id PK
+    uuid conference_id FK
+    uuid sender_id FK
+    uuid receiver_id FK
     string(500) message_text
-    string(100) attachment_location
+    string(500) attachment_location
   }
 
   conference_video_out_buffer {
-    int64 conference_id
+    uuid conference_id PK
     rdp_frame videoframe
   }
 
   conference_audio_out_buffer {
-    int64 conference_id
+    uuid conference_id PK
     rdp_frame audioframe
   }
 
   conference_audio_in_buffer {
-    int64 participant_id
-    int64 conference_id
+    uuid participant_id PK
+    uuid conference_id FK
     rdp_frame audioframe
   }
 
   conference_video_in_buffer {
-    int64 participant_id
-    int64 conference_id
+    uuid participant_id PK
+    uuid conference_id FK
     rdp_frame videoframe
   }
 
-  live_conference_cache {
-    int64 conference_id
+  live_conference {
+    uuid conference_id PK
     conference_participant[] participants
     conference[] children
     chat_messages[] chat
+    enum recording_state "Стоп, пауза, идет"
+    int32 average_participants
   }
 
   conference_participant ||--o| user : might_be
   conference_participant ||--o| conference : participates_in
+  conference_metrics ||--|| conference : stored_from
 
-  conference ||--o| conference_recording : might_have
-
-  conference ||--|| chat : has
-  user ||--|| conference : owns
+  user ||--|{ conference : owns
 
   user_auth_token }o--|| user : authenticates
 
   conference }o--o| conference : might_have_parent
 
-  chat_message }o--|| chat : in
   chat_message ||--o| chat_message_attachment: might_have
-  conference_participant ||--|| chat_message : sends
-  conference_participant |o--|| chat_message : receives
-
-  chat ||--o| chat_recording : might_have
+  conference_participant ||--|{ chat_message : sends
+  conference_participant |o--|{ chat_message : receives
 
   chat_message ||--o| chat_message_buffer : are_sended_in_real_time_via
 
@@ -676,47 +691,141 @@ erDiagram
   conference_participant ||--o| conference_audio_in_buffer : uploads_audio_to
   conference_participant ||--o| conference_video_in_buffer : uploads_video_to
 
+  chat_message }o--|| conference : are_sended_in
+
 ```
-
-*Примечание*. Названия типов приведены условно, так как они зависят от выбора
-конкретной СУБД.
-
-*Примечание 2*. Для conference_cache связи не указаны,
-чтобы сохранить читаемость схемы.
 
 ### Описание сущностей
 
-| Сущность                    | Назначение                                                                   | Дополнительные требования к консистентности                                                         | Объем единицы сущности |
-|-----------------------------|------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|------------------------|
-| user_auth_token             | Хранение авторизационных токенов зарегистрированных пользователей            | Отсутствуют                                                                                         | 28 байт                |
-| conference_participant      | Хранение данных участника конференции                                        | Отсутствуют                                                                                         | 80 байт                |
-| user                        | Хранение данных зарегистрированного пользователя                             | Отсутствуют                                                                                         | 174 байт               |
-| conference                  | Хранение данных конференции                                                  | Создается одновременно с chat                                                                       | 206 байт               |
-| conference_video_out_buffer | Реализация publisher-subscriber для видеопотока живой конференции            | Уничтожается после завершения конференции                                                           | 3.8 Мбит               |
-| conference_audio_out_buffer | Реализация publisher-subscriber для аудиопотока живой конференции            | Уничтожается после завершения конференции                                                           | 80 Кбит                |
-| conference_video_in_buffer  | Реализация publisher-subscriber для видеопотока живой конференции            | Уничтожается с выходом conference_participant из конференции                                        | 3.8 Мбит               |
-| conference_audio_in_buffer  | Реализация publisher-subscriber для аудиопотока живой конференции            | Уничтожается с выходом conference_participant из конференции                                        | 80 Кбит                |
-| conference_recording        | Хранение записи конференции (Файловое хранилище, имеет схему с кэшированием) | Отсутствуют, так как сущность не может быть изменена после создания                                 | ~12 Гбайт              |
-| chat                        | Хранение чата конференции                                                    | Создается одновременно с conference                                                                 | 32 байт                |
-| chat_recording              | Хранение записи чата (Файловое хранилище, кэш)                               | Отсутствуют, так как сущность не может быть изменена после создания                                 | Не фиксируется ~ 6 кБ  |
-| chat_message                | Хранение сообщения в чате                                                    | Отсутствуют                                                                                         | 556 байт               |
-| chat_message_attachment     | Хранение прикрепленных файлов в чате (Файловое хранилище)                    | Нужно удалять, если удаляется chat_message, содержащий её                                           | ~10 Мб                 |
-| chat_message_buffer         | Реализация publisher-subscriber для сообщений в чате                         | Состоит из дублирующихся данных, но живет мало. attachment_location указывает на прикрепленный файл | 632 байт               |
+| Сущность                    | Назначение                                            | Размер               |
+|-----------------------------|-------------------------------------------------------|----------------------|
+| chat_message                | Хранение сообщений чата                               | (596 ... 1396) байт  |
+| chat_message_attachment     | Хранение прикреплений сообщений                       | 800 байт + 10 Мбайт  |
+| conference                  | Хранение горячих данных о конференции                 | 1230 байт + 12 Гбайт |
+| conference_metrics          | Хранение холодных метрик конференции                  | 53 байт              |
+| conference_participant      | Хранение участников конференции                       | 114 байт             |
+| user_auth_token             | Хранение авторизационного токена пользователя         | 144 байт             |
+| user                        | Хранение зарегистрированного пользователя             | >= 174 байт          |
+| chat_message_buffer         | Асинхронная очередь для отправки сообщений            | 1064 байт            |
+| conference_video_out_buffer | Часть буфера сокета UDP-соединения для отправки видео | 3.8 Мбит             |
+| conference_audio_out_buffer | Часть буфера сокета UDP-соединения для отправки аудио |  ~8 Кбайт            |
+| conference_video_in_buffer  | Часть буфера сокета UDP-соединения для приема видео   | 3.8 Мбит             |
+| conference_audio_in_buffer  | Часть буфера сокета UDP-соединения для приема аудио   | ~ 8 Кбайт            |
+| live_conference             | Хранение состояния активной конференции               | ~ 4 КБайт            |
 
-### Особенности распределения нагрузки по ключам
+*Примечание:*
 
-* Практически каждый пользователь сходит в таблицу conference
-  для получения данных о конференции. Поэтому на
-  неё приходится большая часть продуктовой нагрузки на чтение
+Все размеры рассчитаны исходя из размеров структур данных на ER-диаграме.
+Для буферов выбран размер одного кадра. Для структур с ~ взято среднее значение
+для размера массивов.
 
-* Для chat и conference применен partitioning.
-  Это нужно для того, чтобы разделить запросы по доменам
+* "~" означает приблизительно и может варьироваться
+* "..." указывает на точный диапазон
+* ">=" является оценкой снизу
 
-* conference_participant, помимо сопоставимой нагрузки на чтение,
-  как и для conference, обладает такой же нагрузкой и на запись, так как
-  conference_participant создается для КАЖДОЙ конференции для КАЖДОГО её участника.
-  Поэтому для доступа к производной информации о участнике используется кэш, который
-  умирает вместе с остановкой конференции.
+### Нагрузка на сущности
+
+*Примечание 1.* Все расчеты QPS указаны без учета кэширования, буферизации и
+иных способов снятия нагрузки на чтение и запись.
+
+Для начала обозначим, за счет чего образуется нагрузка на сущностях:
+
+1. chat_message:
+    * На чтение:
+      1. Прочтение сообщения (90270 RPS)
+      2. Сборка записи чата ($\approx$ 0 RPS по сравнению с верхним значением)
+    * На запись:
+      1. Отправка сообщения (9027 RPS)
+2. chat_message_attachment:
+    * На чтение:
+      1. Прочтение сообщения с файлом (9030 RPS)
+    * На запись
+      1. Отправка сообщения с файлом (903 RPS)
+3. conference
+    * На чтение:
+      1. Подключение к конференции (2x1170=2340 RPS, с запасом на переподключения)
+      2. Скачивание записи конференции (0, на пару порядков ниже верхнего значения)
+    * На запись:
+      1. Создание/Планирование конференции (117 RPS)
+      2. Запись ссылки на рендер записи (117 RPS)
+      3. Начало конференции (117 RPS)
+      4. Завершение конференции (117 RPS)
+4. conference_metrics
+    * На чтение:
+      1. Различные аналитические запросы. Тяжелые, но маленькие запросы
+    * На запись:
+      1. Завершение конференции (107 RPS)
+5. conference_participant
+    * На чтение:
+      1. Сборка записи чата (1170 RPS)
+    * На запись:
+      1. Человек входит в конференцию (2340 RPS)
+      2. Человек меняет имя в конференции (234 RPS)
+
+6. user_auth_token
+    * На чтение:
+      1. Подключение к конференции (2340 RPS)
+      2. Создание конференции (117 RPS)
+      3. Смена имени в конференции (234 RPS)
+      4. Начало записи конференции (39 RPS)
+      5. Окончание записи (39 RPS)
+      6. Выход из конференции (2340 RPS)
+      7. Отправка сообщения в чат (9027 RPS)
+      8. Прочтение сообщения из чата (90270 RPS)
+    * На запись:
+      1. Авторизация (6405 RPS)
+      2. Регистрация (8 RPS)
+
+### Особенности поддержания консистентности сущностей
+
+1. chat_message  
+Для минимизации join операций он хранит в себе копию chat_message_attachment.
+Поэтому при изменении исходника, нужно поменять и эту копию.
+
+2. chat_message_attachment  
+Особых требований нет.
+
+3. conference  
+Особых требований нет.
+
+4. conference_metrics  
+chat_messages_count - поле, которое можно рассчитать
+при помощи таблицы chat_message. Кроме того, max_participants
+можно рассчитать из таблицы conference_participant, duration и has_recording -
+из таблицы conference. Поле average_participants фиксирует последнее состояние
+поля average_participants из live_conference.
+
+5. conference_participant  
+Для участников конференции, являющихся зарегистрированными пользователями,
+начальное значение participant_name должно совпадать с полем name
+в таблице user.
+
+6. user_auth_token  
+Особых требований нет.
+
+7. user  
+Поле pending_conferences является производным и рассчитывается из
+таблицы conference по дате и user_id.
+
+8. chat_message_buffer  
+Вся информация в буфере дублирует аналогичные поля из таблицы
+chat_message.
+
+9. conference_video_out_buffer  
+Особых требований нет.
+
+10. conference_audio_out_buffer  
+Особых требований нет.
+
+11. conference_video_in_buffer  
+Особых требований нет.
+
+12. conference_audio_in_buffer  
+Особых требований нет.
+
+13. live_conference
+Вся информация является первичной по отношению к аналогичным полям из остальных
+таблиц. Непроизводными полями являются recording_state и average_participant.
 
 ## 6. Физическая схема БД
 
