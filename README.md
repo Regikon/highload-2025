@@ -36,11 +36,6 @@
   * [Нагрузка на сущности](#нагрузка-на-сущности)
   * [Особенности поддержания консистентности сущностей](#особенности-поддержания-консистентности-сущностей)
 * [6. Физическая схема БД](#6-физическая-схема-бд)
-  * [Выбор индексов](#выбор-индексов)
-  * [Денормализация](#денормализация)
-  * [Выбор СУБД](#выбор-субд)
-  * [Шардирование и резервирование СУБД (потаблично)](#шардирование-и-резервирование-субд-потаблично)
-  * [Балансировка запросов / мультиплексирование подключений](#балансировка-запросов--мультиплексирование-подключений)
   * [Схема резервного копирования](#схема-резервного-копирования)
 * [Список источников](#список-источников)
 
@@ -761,7 +756,6 @@ erDiagram
     * На запись:
       1. Человек входит в конференцию (2340 RPS)
       2. Человек меняет имя в конференции (234 RPS)
-
 6. user_auth_token
     * На чтение:
       1. Подключение к конференции (2340 RPS)
@@ -775,56 +769,49 @@ erDiagram
     * На запись:
       1. Авторизация (6405 RPS)
       2. Регистрация (8 RPS)
-
 7. user
-  * На чтение:
-    1. Подключение к конференции (2340 RPS)
-    2. Авторизация (6405 RPS)
-  * На запись:
-    1. Создание конференции (117 RPS)
-    2. Регистрация (8 RPS)
-
+    * На чтение:
+      1. Подключение к конференции (2340 RPS)
+      2. Авторизация (6405 RPS)
+    * На запись:
+      1. Создание конференции (117 RPS)
+      2. Регистрация (8 RPS)
 8. chat_message_buffer
-  * На чтение:
-    1. Прочтение сообщения (90270 RPS)
-  * На запись:
-    1. Отправка сообщения (9027 RPS)
-
+    * На чтение:
+      1. Прочтение сообщения (90270 RPS)
+    * На запись:
+      1. Отправка сообщения (9027 RPS)
 9. conference_video_out_buffer
-  * На чтение:
-    1. Просмотр конференции (10000 RPS)
-  * На запись:
-    1. Генерация кадра конференции (1000 RPS)
-
+    * На чтение:
+      1. Просмотр конференции (10000 RPS)
+    * На запись:
+      1. Генерация кадра конференции (1000 RPS)
 10. conference_audio_out_buffer
-  * На чтение:
-    1. Просмотр конференции (10000 RPS)
-  * На запись:
-    1. Генерация кадра конференции (1000 RPS)
-
+    * На чтение:
+      1. Просмотр конференции (10000 RPS)
+    * На запись:
+      1. Генерация кадра конференции (1000 RPS)
 11. conference_video_in_buffer
-  * На чтение:
-    1. Генерация кадра конференции (10000 RPS)
-  * На запись:
-    1. Отправка кадра конференции (10000 RPS)
-
+    * На чтение:
+      1. Генерация кадра конференции (10000 RPS)
+    * На запись:
+      1. Отправка кадра конференции (10000 RPS)
 12. conference_audio_in_buffer
-  * На чтение:
-    1. Генерация кадра конференции (10000 RPS)
-  * На запись:
-    1. Отправка кадра конференции (10000 RPS)
-
+    * На чтение:
+      1. Генерация кадра конференции (10000 RPS)
+    * На запись:
+      1. Отправка кадра конференции (10000 RPS)
 13. live_conference
-  * На чтение:
-    1. Вход в конференцию (2340 RPS)
-    2. Просмотр сообщения из чата (90270 RPS)
-  * На запись:
-    1. Вход в конференцию (2340 RPS)
-    2. Выход из конференции (2340 RPS)
-    3. Отправка сообщения в чат (9027 RPS)
-    4. Начало записи (39 RPS)
-    5. Окончание записи (39 RPS)
-    6. Смена имени в конференции (234 RPS)
+    * На чтение:
+      1. Вход в конференцию (2340 RPS)
+      2. Просмотр сообщения из чата (90270 RPS)
+    * На запись:
+      1. Вход в конференцию (2340 RPS)
+      2. Выход из конференции (2340 RPS)
+      3. Отправка сообщения в чат (9027 RPS)
+      4. Начало записи (39 RPS)
+      5. Окончание записи (39 RPS)
+      6. Смена имени в конференции (234 RPS)
 
 | Сущность                    | RPS чтение | RPS запись |
 |-----------------------------|------------|------------|
@@ -895,89 +882,167 @@ chat_message.
 
 ## 6. Физическая схема БД
 
-### Выбор индексов
+Для удобства продублируем логическую схему без комментариев по сущностям. Будем
+следовать следующим правилам:
 
-В основном поиск сущностей происходит по первичному ключу, для которого уже существует
-индекс из коробки. Среди дополнительных индексов нам потребуется:
+* Комментарий для первого атрибута указывает на СУБД, в которой будем хранить сущность.
+  Очевидно, что для всех первичных ключей автоматически формируется индекс.
+* Для сущностей с файлами в строке с файлом указано, как хранится файл
+* Остальные комментарии будут говорить про индексы.
+* Так как денормализация произведена ранее, не будем её снова описывать
+* В незанятых строках поясняется механизм шардинга
 
-1. Индекс в таблице chat_message по атрибуту chat_id. Нужен для восстановления
-   конкретного чата.
-2. Индекс в таблице conference по атрибуту parent_id. Нужен для поиска сессионных
-   залов по конференции.
-3. Индекс в таблице user по email пользователя. Нужен для быстрой авторизации.
-4. Индекс в таблице conference_participant по атрибуту conference_id.
-   Нужен для поиска всех участников конкретной конференции.
-5. Индекс в таблице chat_message по составному ключу (conference_id, receiver_id).
-   Нужен для фильтрации сообщений для конкретного пользователя.
-6. Индекс в таблице chat_message по составному ключу (conference_id, sender_id).
-   Нужен для восстановления сообщений конкрентного отправителя.
+```mermaid
+erDiagram
 
-### Денормализация
+  chat_message {
+    uuid id PK "MongoDB"
+    string(500) text "Шардинг по conference_id"
+    uuid sender_id
+    uuid receiver_id
+    uuid conference_id "BTree индекс"
+    uuid attached_id
+    json attached
+    datetime created_at
+    datetime updated_at
+  }
 
-### Выбор СУБД
+  chat_message_attachment {
+    uuid id PK "MongoDB"
+    int64 size "Шардинг по conference_id (часть chat_message)"
+    string(260) name
+    string(500) url
+    file attachment "Ceph S3"
+    datetime created_at
+    datetime updated_at
+  }
 
-1. user_auth_session: требуется высокий RPS,
-   надежность хранения не важна, поэтому Redis;
-2. conference_participant: нужно долговременно хранить, важна консистентность SQL
-3. user: нужно долговременно хранить, данных мало, доступ только по ключу. SQL
-4. conference: относительно малая нагрузка
-5. conference_video_out_buffer: Без СУБД. Храним в памяти как часть приложения.
-6. conference_audio_out_buffer: Без СУБД. Храним в памяти как часть приложения.
-7. conference_video_in_buffer: Без СУБД. Храним в памяти как часть приложения.
-8. conference_audio_in_buffer: Без СУБД. Храним в памяти как часть приложения.
-9. conference_recording: Объектное хранилище на базе S3.
-10. chat: нагрузка небольшая, только чтобы получать запись. SQL.
-11. chat_recording: Объектное хранилище на базе S3.
-12. chat_message: относительно большая нагрузка, можно использовать YDB.
-13. chat_message_attachment: Объектное хранилище на базе S3.
-14. chat_message_buffer: Нужно точно отправить, отправить всем получателям.
-    Apache Kafka.
-15. live_conference_cache: Малое время жизни, можно восстановить,
-    нужен быстрый доступ, возможно нефиксированная структура. MongoDB.
+  conference {
+    uuid id PK "PostgreSQL"
+    uuid owner_id "BTree индекс"
+    uuid parent_id "Hash индекс (малое количество строк с одним хэшом)"
+    string(100) name "Шардинг по id"
+    string(50) join_password
+    string(250) join_link "BTree индекс"
+    string(250) server_location
+    string(500) recording_url
+    file recording "Ceph S3"
+    datetime started_at
+    datetime ended_at
+    datetime created_at
+    datetime updated_at
+  }
 
-### Шардирование и резервирование СУБД (потаблично)
+  conference_metrics {
+    uuid id "ClickHouse"
+    int32 max_participants
+    int32 average_participants
+    int32 chat_messages_count
+    float64 duration
+    bool has_recording
+    datetime created_at "BTree индекс"
+    datetime updated_at
+  }
 
-1. user_auth_session: шардируем по user_id. Используем Redis Cluster.
-2. conference_participant: шардинг по conference_id.
-3. user: шардинг по user_id.
-4. conference: шардинг по conference_id.
-5. conference_video_out_buffer: не требуется,
-   фактически происходит за счет скалирования приложения сервера.
-6. conference_audio_out_buffer: не требуется,
-   фактически происходит за счет скалирования приложения сервера.
-7. conference_video_in_buffer: не требуется,
-   фактически происходит за счет скалирования приложения сервера.
-8. conference_audio_in_buffer: не требуется,
-   фактически происходит за счет скалирования приложения сервера.
-9. conference_recording: из коробки.
-10. chat: шардинг по chat_id.
-11. chat_recording: из коробки
-12. chat_message: шардируем по conference_id, реплицируем по схеме mirror-3-dc
-    (3 реплики на один кусок данных)
-13. chat_message_attachment: из коробки
-14. chat_message_buffer: Шардируем по chat_id. Репликация не требуется.
-15. live_conference_cache: шардируем по conference_id при помощи MongoDB
-    sharded cluster.
+  conference_participant {
+    uuid id "PostgreSQL"
+    uuid user_id "Шардинг по conference_id"
+    uuid conference_id "BTree индекс"
+    string(50) participant_name
+    datetime created_at
+    datetime updated_at
+  }
 
-### Балансировка запросов / мультиплексирование подключений
+  user_auth_token {
+    string(128) token "Redis"
+    uuid user_id "Шардинг по token"
+    datetime created_at
+  }
+
+  user {
+    uuid id "PostgreSQL"
+    string(50) name "Шардинг по id"
+    string(50) email "Hash индекс"
+    string(50) password
+    array(conference) pending_conferences
+    datetime created_at
+    datetime updated_at
+  }
+
+  chat_message_buffer {
+    uuid message_id "Kafka"
+    uuid conference_id "Автоматическое партиционирование"
+    uuid sender_id
+    uuid receiver_id
+    string(500) message_text
+    string(500) attachment_location
+  }
+
+conference_video_out_buffer {
+    uuid conference_id "in-memory"
+    rdp_frame videoframe "Шардинг автоматически за счет медиасервера"
+  }
+
+conference_audio_out_buffer {
+    uuid conference_id "in-memory"
+    rdp_frame audioframe "Шардинг автоматически за счет медиасервера"
+  }
+
+conference_audio_in_buffer {
+    uuid participant_id "in-memory"
+    uuid conference_id
+    rdp_frame audioframe "Шардинг автоматически за счет медиасервера"
+  }
+
+conference_video_in_buffer {
+    uuid participant_id "in-memory"
+    uuid conference_id
+    rdp_frame videoframe "Шардинг автоматически за счет медиасервера"
+  }
+
+  live_conference {
+    uuid conference_id "in-memory"
+    conference_participant[] participants
+    conference[] children
+    chat_messages[] chat
+    enum recording_state "Стоп, пауза, идет"
+    int32 average_participants "Шардинг автоматически за счет медиасервера"
+  }
+
+  conference_participant ||--o| user : might_be
+  conference_participant ||--o| conference : participates_in
+  conference_metrics ||--|| conference : stored_from
+
+  user ||--|{ conference : owns
+
+  user_auth_token }o--|| user : authenticates
+
+  conference }o--o| conference : might_have_parent
+
+  chat_message ||--o| chat_message_attachment: might_have
+  conference_participant ||--|{ chat_message : sends
+  conference_participant |o--|{ chat_message : receives
+
+  chat_message ||--o| chat_message_buffer : are_sended_in_real_time_via
+
+  conference ||--o| conference_video_out_buffer : are_translated_in_real_time_via
+  conference ||--o| conference_audio_out_buffer : are_translated_in_real_time_via
+  conference_video_in_buffer }o--|| conference : streaming_in 
+  conference_audio_in_buffer }o--|| conference : streaming_in 
+  conference_participant ||--o| conference_audio_in_buffer : uploads_audio_to
+  conference_participant ||--o| conference_video_in_buffer : uploads_video_to
+
+  chat_message }o--|| conference : are_sended_in
+
+```
 
 ### Схема резервного копирования
 
-1. user_auth_session: не требуется. При падении хранилища пользователи зайдут заново.
-2. conference_participant: останавливаем реплику и копируем с неё снапшот.
-3. user: останавливаем реплику и копируем с неё снапшот.
-4. conference: аналогично user.
-5. conference_video_out_buffer: не требуется
-6. conference_audio_out_buffer: не требуется
-7. conference_video_in_buffer: не требуется
-8. conference_audio_in_buffer: не требуется
-9. conference_recording: не требуется
-10. chat: останавливаем реплику и копируем с неё снапшот.
-11. chat_recording: решается S3.
-12. chat_message: из коробки, в S3
-13. chat_message_attachment: решается S3.
-14. chat_message_buffer: не требуется
-15. live_conference_cache: не требуется
+* PostgreSQL: останавливаем реплику, снимаем с неё данные, включаем обратно.
+* MongoDB: снимаем снапшоты файловой системы при помощи LVM.
+* Kafka: не требуется.
+* Redis: Используем внутренний функционал для создания RDB файла, который затем копируем.
+* ClickHouse: Используем коробочное решение: S3 backup.
 
 ## Список источников
 
