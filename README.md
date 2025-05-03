@@ -56,6 +56,9 @@
     * [Технологии обработки медиа](#технологии-обработки-медиа)
   * [Данные](#данные)
 * [9. Схема проекта](#9-схема-проекта)
+* [11. Аппаратные ресурсы](#11-аппаратные-ресурсы)
+  * [Расчет ресурсов по сервисам](#расчет-ресурсов-по-сервисам)
+  * [Выбор железа](#выбор-железа)
 * [Список источников](#список-источников)
 
 <!-- mtoc-end -->
@@ -1269,6 +1272,66 @@ z позволяет дольше держать в памяти состоян�
 ## 9. Схема проекта
 
 <img src="./img/project_diagram.svg" />
+
+## 11. Аппаратные ресурсы
+
+### Расчет ресурсов по сервисам
+
+| Сервис                        | Целевая пиковая нагрузка приложения | CPU     | RAM        | Net           | Net2       |
+|-------------------------------|-------------------------------------|---------|------------|---------------|------------|
+| Auth Circuit Breaker          | 9013 RPS                            | 2       | 18 MB      | 3 MBs         | 1GbsE      |
+| Auth Gateway                  | 9013 RPS                            | 2       | 18 MB      | 3 MBs         | 1GbsE      |
+| Authorization Check Service   | 2600 RPS                            | 1       | 10 MB      | 1 MBs         | 1GbsE      |
+| Authentication Service        | 6405 RPS                            | 1       | 10 MB      | 2 MBs         | 1GbsE      |
+| Registration Service          | 8 RPS                               | 1       | 10 MB      | 2 KBs         | 1GbsE      |
+| Auth Token Storage            | 9005 RPS                            | 24      | 12 GB      | 3 MBs         | 1GbsE      |
+| User Storage                  | 6413 RPS                            | 12      | 24 GB      | 2 MBs         | 1GbsE      |
+| Chat Gateway                  | 10000 RPS                           | 4       | 35 MB      | 154 KBs       | 1GbsE      |
+| Chat Receiver                 | 900 Connections                     | 6       | 600 MB     | 140 KBs       | 1GbsE      |
+| Chat Sender                   | 9027 RPS                            | 4       | 35 MB      | 14 KBs        | 1GbsE      |
+| Chat Attachments              | 903 RPS                             | 100     | 128 GB     | 9 GBs         | 25GbsE     |
+| Pending Messages              | 9027 RPS                            | 8       | 16 GB      | 28 KBs        | 1GbsE      |
+| Chat Worker                   | 9027 RPS                            | 4       | 35 MB      | 28 KBs        | 1GbsE      |
+| Chat Recording Collector      | < 90 RPS                            | 16      | 1.5 GB     | 14 MBs        | 1GbsE      |
+| Chat Storage                  | 9027 RPS                            | 16      | 16 GB      | 28 KBs        | 1GbsE      |
+| Conference Public Gateway     | 2574 RPS                            | 1       | 10 MB      | 15 KBs        | 1GbsE      |
+| Conference Manager            | 117 RPS                             | 1       | 10 MB      | 15 KBs        | 1GbsE      |
+| Conference Starter            | 117 RPS                             | 1       | 10 MB      | 15 KBs        | 1GbsE      |
+| Conference Router             | 2340 RPS                            | 1       | 10 MB      | 15 KBs        | 1GbsE      |
+| Conference Private API        | 4500 RPS                            | 1       | 10 MB      | 15 KBs        | 1GbsE      |
+| User Conferences              | 117 RPS                             | 4       | 8 GB       | 2 KBs         | 1GbsE      |
+| Conference Queue              | 10296 RPS                           | 8       | 16 GB      | 100 KBs       | 1GbsE      |
+| Media Servers                 | 2500 RPS                            | 8       | 16GB       | < 1KB         | 1GbsE      |
+| Conference Participant        | 3240 RPS                            | 8       | 8GB        | 360 KBs       | 1GbsE      |
+| Participant Writer            | 900 RPS                             | 1       | 10 MB      | 120 KBs       | 1GbsE      |
+| Server Registrator            | 117 RPS                             | 1       | 10 MB      | 20 KBs        | 1GbsE      |
+| Metrics Worker                | 900 RPS                             | 1       | 10 MB      | 15 KBs        | 1GbsE      |
+| Chunk Index Updater           | 3010 RPS                            | 1       | 10 MB      | 15 KBs        | 1GbsE      |
+| Conference User Writer        | 117 RPS                             | 1       | 10 MB      | 15 KBs        | 1GbsE      |
+| Conference Writer             | 357 RPS                             | 1       | 10 MB      | 45 KBs        | 1GbsE      |
+| Media Server Manager          | 234 RPS                             | 1       | 10 MB      | 45 KBs        | 1GbsE      |
+| Garbage Collector             | 4 RPH                               | 1       | 10 MB      | < 1 KBs       | 1GbsE      |
+| Recording Scheduler           | 117 RPS                             | 1       | 10 MB      | 15 KBs        | 1GbsE      |
+| Conference Storage            | 351 RPS                             | 8       | 8 GB       | 45 KBs        | 1GbsE      |
+| Conference Metrics            | 900 RPS                             | 8       | 32 GB      | 10 KBs        | 1GbsE      |
+| Chunk Index Storage           | 3040 RPS                            | 16      | 16 GB      | 200 KBs       | 1GbsE      |
+| Conference Recording Renderer | 30 RPS                              | 30      | 720 GB     | 450 GBs       | min 25GbsE |
+| Chunk Storage Cleaner         | 30 RPS                              | 1       | 10 MB      | 150 KBs       | 1GbsE      |
+| Chunk Index Cleaner           | 30 RPS                              | 1       | 10 MB      | <1 KBs        | 1GbsE      |
+| Recording Storage             | 30 RPS                              | 16      | 1.5 GB     | 450 GBs       | 1GbsE      |
+| Media Chunks Storage          | 3010 RPS                            | 16      | 1.5 GB     | 1.5 GBs       | 10GbsE     |
+| Media Server Allocator        | 240 RPS                             | 4       | 8 GB       | < 1MBs        | 1GBsE      |
+| Mediaserver                   | 15 Connections x 117 Conferences    | 4 x 117 | 8 GB x 117 | 120 MBs x 117 | 25 GBsE    |
+| Load Balancer                 | 30000 RPS                           | 2       | 16 GB      | 7 GBs         | 25 GBsE    |
+| Ingress Controller            | 23487 RPS                           | 2       | 16 GB      | 240 MBs       | 10 GbsE    |
+
+### Выбор железа
+
+Большинство сервисов размещаются в рамках k8s кластера. Для нод k8s используем
+> 2x6338/16x32GB/2xNVMe4T/2x25Gbs (64 ядра на один сервер)
+
+Для медиасерверов и сервисов рендеринга записей берется дополнительно к 
+ранее упомянутой конфигурации GPU AMD Radeon RX 9070.
 
 ## Список источников
 
