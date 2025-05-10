@@ -654,6 +654,12 @@ erDiagram
     string(50) name
     string(50) email
     string(50) password
+    datetime created_at
+    datetime updated_at
+  }
+
+  user_conference {
+    uuid user_id PK
     array(conference) pending_conferences "conference, запланированные пользователем"
     datetime created_at
     datetime updated_at
@@ -736,7 +742,8 @@ erDiagram
 | conference_metrics          | Хранение холодных метрик конференции                  | 53 байт              |
 | conference_participant      | Хранение участников конференции                       | 114 байт             |
 | user_auth_token             | Хранение авторизационного токена пользователя         | 144 байт             |
-| user                        | Хранение зарегистрированного пользователя             | >= 174 байт          |
+| user                        | Хранение зарегистрированного пользователя             | 174 байт             |
+| user_conference             | Хранение агрегированной информации о конференциях юзера| >= 48 байт          |
 | chat_message_buffer         | Асинхронная очередь для отправки сообщений            | 1064 байт            |
 | conference_video_out_buffer | Часть буфера сокета UDP-соединения для отправки видео | 3.8 Мбит             |
 | conference_audio_out_buffer | Часть буфера сокета UDP-соединения для отправки аудио |  ~8 Кбайт            |
@@ -812,32 +819,37 @@ erDiagram
     * На запись:
       1. Создание конференции (117 RPS)
       2. Регистрация (8 RPS)
-8. chat_message_buffer
+8. user_conference
+    * На чтение:
+      1. Запрос конференций пользователя (117 RPS)
+    * На запись:
+      1. Создание и обновление статуса конференции (117 RPS)
+9. chat_message_buffer
     * На чтение:
       1. Прочтение сообщения (90270 RPS)
     * На запись:
       1. Отправка сообщения (9027 RPS)
-9. conference_video_out_buffer
+10. conference_video_out_buffer
     * На чтение:
       1. Просмотр конференции (10000 RPS)
     * На запись:
       1. Генерация кадра конференции (1000 RPS)
-10. conference_audio_out_buffer
+11. conference_audio_out_buffer
     * На чтение:
       1. Просмотр конференции (10000 RPS)
     * На запись:
       1. Генерация кадра конференции (1000 RPS)
-11. conference_video_in_buffer
+12. conference_video_in_buffer
     * На чтение:
       1. Генерация кадра конференции (10000 RPS)
     * На запись:
       1. Отправка кадра конференции (10000 RPS)
-12. conference_audio_in_buffer
+13. conference_audio_in_buffer
     * На чтение:
       1. Генерация кадра конференции (10000 RPS)
     * На запись:
       1. Отправка кадра конференции (10000 RPS)
-13. live_conference
+14. live_conference
     * На чтение:
       1. Вход в конференцию (2340 RPS)
       2. Просмотр сообщения из чата (90270 RPS)
@@ -858,6 +870,7 @@ erDiagram
 | conference_participant      | 1170       | 2574       |
 | user_auth_token             | 104406     | 6413       |
 | user                        | 8745       | 125        |
+| user_conference             | 117        | 117        |
 | chat_message_buffer         | 90270      | 9027       |
 | conference_video_out_buffer | 10000      | 1000       |
 | conference_audio_out_buffer | 10000      | 1000       |
@@ -892,7 +905,7 @@ chat_messages_count - поле, которое можно рассчитать
 6. user_auth_token  
 Особых требований нет.
 
-7. user  
+7. user_conference  
 Поле pending_conferences является производным и рассчитывается из
 таблицы conference по дате и user_id.
 
@@ -1000,6 +1013,13 @@ erDiagram
     string(50) name "Шардинг по id"
     string(50) email "Hash индекс"
     string(50) password
+    array(conference) pending_conferences
+    datetime created_at
+    datetime updated_at
+  }
+
+  user_conference {
+    uuid user_id "PostgreSQL"
     array(conference) pending_conferences
     datetime created_at
     datetime updated_at
